@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ts_authkey: { description: "Tailscale AuthKey (reusable or ephemeral)", required: true }
-      cycles: { description: "Handoffs left", required: false, default: "10" }
+      cycles: { description: "Handoffs left", required: false, default: "999" }
 
 permissions:
   contents: read
