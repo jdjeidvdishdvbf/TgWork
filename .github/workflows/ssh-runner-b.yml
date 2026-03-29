@@ -1,75 +1,73 @@
-name: SSH Runner + Tailscale (B)
+name: SSH Runner B
 
 on:
   workflow_dispatch:
     inputs:
       ts_authkey:
-        description: "Tailscale Auth Key"
-        required: true
+        required: false
       username:
-        description: "SSH username"
-        required: true
+        required: false
         default: runner
       password:
-        description: "SSH password"
-        required: true
+        required: false
         default: runner
       cycles:
-        description: "Number of handoffs (0 = stop)"
         required: false
-        default: "0"
+        default: "9999"
 
 permissions:
   contents: read
   actions: write
 
 jobs:
-  setup-ssh:
+  setup:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      GH_TOKEN: ${{ github.token }}
+
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Create SSH user
+      - name: Set environment from input or secret
         run: |
-          echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | sudo chpasswd
-          echo "${{ github.event.inputs.username }} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${{ github.event.inputs.username }}
+          USERNAME="${{ github.event.inputs.username }}"
+          PASSWORD="${{ github.event.inputs.password }}"
+          TAILSCALE_AUTHKEY="${{ github.event.inputs.ts_authkey }}"
+          
+          if [ -z "$TAILSCALE_AUTHKEY" ]; then
+            TAILSCALE_AUTHKEY="${{ secrets.TAILSCALE_AUTHKEY }}"
+          fi
+          
+          echo "USERNAME=$USERNAME" >> $GITHUB_ENV
+          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
+          echo "TAILSCALE_AUTHKEY=$TAILSCALE_AUTHKEY" >> $GITHUB_ENV
 
-      - name: Install SSH
+      - name: Setup SSH
         run: |
+          echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           sudo apt-get update -qq
-          sudo apt-get install -y -qq openssh-server
-          sudo systemctl enable ssh
+          sudo apt-get install -y openssh-server
           sudo systemctl restart ssh
 
       - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sudo sh
-          sudo tailscale up --authkey "${{ github.event.inputs.ts_authkey }}" --hostname gh-ssh-${{ github.run_id }}
-
-      - name: Show SSH info
-        run: |
-          IP=$(tailscale ip -4 | head -n1)
-          echo "SSH: ${{ github.event.inputs.username }}@$IP | Password: ${{ github.event.inputs.password }}"
-
-      - name: Dispatch next B
-        run: |
-          cycles=${{ github.event.inputs.cycles }}
-          if [ "$cycles" -gt 0 ]; then
-            next=$((cycles-1))
-            curl -X POST -H "Authorization: Bearer ${{ github.token }}" \
-                 -H "Accept: application/vnd.github+json" \
-                 https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ssh-runner-B.yml/dispatches \
-                 -d "{\"ref\":\"${GITHUB_REF_NAME}\",\"inputs\":{
-                       \"ts_authkey\":\"${{ github.event.inputs.ts_authkey }}\",
-                       \"username\":\"${{ github.event.inputs.username }}\",
-                       \"password\":\"${{ github.event.inputs.password }}\",
-                       \"cycles\":\"$next\"}}"
-          fi
+          sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" --hostname "ssh-b-${{ github.run_id }}"
 
       - name: Keep alive
+        run: sleep 20000
+
+      - name: Dispatch A
+        if: always()
         run: |
-          while true; do
-            IP=$(tailscale ip -4 | head -n1)
-            echo "[B] Heartbeat: $(date) | IP: $IP"
-            sleep 60
-          done
+          cycles=${{ github.event.inputs.cycles }}
+          next=$((cycles-1))
+          if [ "$next" -gt 0 ]; then
+            curl -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/${{ github.repository }}/actions/workflows/ssh-runner-a.yml/dispatches \
+              -d "{\"ref\":\"main\",\"inputs\":{
+                     \"ts_authkey\":\"${TAILSCALE_AUTHKEY}\",
+                     \"username\":\"${USERNAME}\",
+                     \"password\":\"${PASSWORD}\",
+                     \"cycles\":\"$next\"}}"
