@@ -3,44 +3,73 @@ name: SSH Runner + Tailscale (A)
 on:
   workflow_dispatch:
     inputs:
-      ts_authkey: { description: "Tailscale AuthKey (only used first time)", required: true }
-      cycles: { description: "Number of handoffs (0=stop after this)", required: false, default: "1" }
+      ts_authkey:
+        description: "Tailscale Auth Key"
+        required: true
+      username:
+        description: "SSH username"
+        required: true
+        default: runner
+      password:
+        description: "SSH password"
+        required: true
+        default: runner
+      cycles:
+        description: "Number of handoffs (0 = stop)"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+  actions: write
 
 jobs:
-  ssh-runner:
+  setup-ssh:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Create SSH user
+        run: |
+          echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | sudo chpasswd
+          echo "${{ github.event.inputs.username }} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${{ github.event.inputs.username }}
+
+      - name: Install SSH
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openssh-server
+          sudo systemctl enable ssh
+          sudo systemctl restart ssh
+
       - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sudo sh
+          sudo tailscale up --authkey "${{ github.event.inputs.ts_authkey }}" --hostname gh-ssh-${{ github.run_id }}
 
-      - name: Start Tailscale (only first run with authkey)
+      - name: Show SSH info
         run: |
-          STATE="/var/lib/tailscale/tailscaled.state"
-          if [ ! -f "$STATE" ]; then
-            echo "First time: using AuthKey"
-            sudo tailscale up --authkey "${{ github.event.inputs.ts_authkey }}" --hostname "runner-A"
-          else
-            echo "Already authorized: just up"
-            sudo tailscale up --hostname "runner-A"
+          IP=$(tailscale ip -4 | head -n1)
+          echo "SSH: ${{ github.event.inputs.username }}@$IP | Password: ${{ github.event.inputs.password }}"
+
+      - name: Dispatch B
+        run: |
+          cycles=${{ github.event.inputs.cycles }}
+          if [ "$cycles" -gt 0 ]; then
+            next=$((cycles-1))
+            curl -X POST -H "Authorization: Bearer ${{ github.token }}" \
+                 -H "Accept: application/vnd.github+json" \
+                 https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ssh-runner-B.yml/dispatches \
+                 -d "{\"ref\":\"${GITHUB_REF_NAME}\",\"inputs\":{
+                       \"ts_authkey\":\"${{ github.event.inputs.ts_authkey }}\",
+                       \"username\":\"${{ github.event.inputs.username }}\",
+                       \"password\":\"${{ github.event.inputs.password }}\",
+                       \"cycles\":\"$next\"}}"
           fi
-          echo "Tailscale IP: $(tailscale ip -4 | head -n1)"
 
       - name: Keep alive
         run: |
           while true; do
-            echo "Runner-A heartbeat $(date)"
+            IP=$(tailscale ip -4 | head -n1)
+            echo "[A] Heartbeat: $(date) | IP: $IP"
             sleep 60
           done
-
-      - name: Dispatch next B
-        if: ${{ github.event.inputs.cycles != '0' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          NEXT=$(( ${{ github.event.inputs.cycles }} - 1 ))
-          curl -X POST \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/tailscale-cycle-B.yml/dispatches \
-            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"ts_authkey\":\"${{ github.event.inputs.ts_authkey}}\",\"cycles\":\"$NEXT\"}}"
