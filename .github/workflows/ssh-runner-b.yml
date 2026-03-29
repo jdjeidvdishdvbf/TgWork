@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
     inputs:
       cycles:
-        description: "скільки разів перезапускати (9999 = майже вічно)"
         required: false
         default: "9999"
 
@@ -23,7 +22,9 @@ jobs:
       PASSWORD: runner
 
     steps:
-      - name: Setup user + SSH
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
         run: |
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           sudo apt-get update -qq
