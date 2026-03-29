@@ -21,8 +21,6 @@ jobs:
       TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
       USERNAME: runner
       PASSWORD: runner
-      TG_TOKEN: "7361353728:AAHbzfLNjuG8zxatvkCrhVGKWi3MrcTOg-g"
-      TG_CHAT_ID: "1047092792"
 
     steps:
       - name: Setup user + SSH
@@ -30,7 +28,7 @@ jobs:
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
           sudo apt-get update -qq
-          sudo apt-get install -y openssh-server python3 python3-pip curl
+          sudo apt-get install -y openssh-server
           sudo systemctl enable ssh
           sudo systemctl restart ssh
 
@@ -39,31 +37,10 @@ jobs:
           curl -fsSL https://tailscale.com/install.sh | sudo sh
           sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" --hostname "ssh-a-${{ github.run_id }}"
 
-      - name: Send Telegram Bot Ping
+      - name: Show connection
         run: |
           IP=$(tailscale ip -4 | head -n1)
-          echo "
-import time
-import os
-import requests
-
-TOKEN = '${TG_TOKEN}'
-CHAT_ID = '${TG_CHAT_ID}'
-
-def send_message(text):
-    url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
-    requests.post(url, data={'chat_id': CHAT_ID, 'text': text})
-
-send_message('SSH Runner A запущено! SSH: ${USERNAME}@${IP}')
-
-while True:
-    ping = os.popen('ping -c 1 google.com').read()
-    send_message(f'Ping:\\n{ping}')
-    time.sleep(30)
-" > tg_ping_a.py
-
-      - name: Run Telegram Bot
-        run: python3 tg_ping_a.py &
+          echo "SSH: ssh ${USERNAME}@${IP}"
 
       - name: Keep alive
         run: sleep 20000
