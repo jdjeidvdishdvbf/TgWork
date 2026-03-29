@@ -1,0 +1,41 @@
+name: SSH Runner + Tailscale (B)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ts_authkey: { description: "Tailscale AuthKey (reusable or ephemeral)", required: true }
+      cycles: { description: "Handoffs left", required: false, default: "10" }
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  ssh-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH & Tailscale
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openssh-server curl
+          curl -fsSL https://tailscale.com/install.sh | sudo sh
+          sudo tailscale up --authkey "${{ github.event.inputs.ts_authkey }}" --hostname "ssh-${{ github.run_id }}"
+          sudo systemctl enable ssh
+          sudo systemctl restart ssh
+          echo "SSH ready at $(tailscale ip -4 | head -n1)"
+
+      - name: Keep alive
+        run: |
+          while true; do sleep 60; done
+
+      - name: Dispatch next workflow A
+        if: ${{ github.event.inputs.cycles != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          next=$(( ${{ github.event.inputs.cycles }} - 1 ))
+          curl -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/ssh-A.yml/dispatches \
+            -d "{\"ref\":\"${{ github.ref }}\",\"inputs\":{\"ts_authkey\":\"${{ github.event.inputs.ts_authkey}}\",\"cycles\":$next}}"
