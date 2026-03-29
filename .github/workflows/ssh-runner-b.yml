@@ -3,14 +3,6 @@ name: SSH Runner B
 on:
   workflow_dispatch:
     inputs:
-      ts_authkey:
-        required: false
-      username:
-        required: false
-        default: runner
-      password:
-        required: false
-        default: runner
       cycles:
         required: false
         default: "9999"
@@ -23,29 +15,19 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+
     env:
-      GH_TOKEN: ${{ github.token }}
+      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+      USERNAME: runner
+      PASSWORD: runner
 
     steps:
-      - name: Set environment from input or secret
-        run: |
-          USERNAME="${{ github.event.inputs.username }}"
-          PASSWORD="${{ github.event.inputs.password }}"
-          TAILSCALE_AUTHKEY="${{ github.event.inputs.ts_authkey }}"
-          
-          if [ -z "$TAILSCALE_AUTHKEY" ]; then
-            TAILSCALE_AUTHKEY="${{ secrets.TAILSCALE_AUTHKEY }}"
-          fi
-          
-          echo "USERNAME=$USERNAME" >> $GITHUB_ENV
-          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
-          echo "TAILSCALE_AUTHKEY=$TAILSCALE_AUTHKEY" >> $GITHUB_ENV
-
       - name: Setup SSH
         run: |
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           sudo apt-get update -qq
           sudo apt-get install -y openssh-server
+          sudo systemctl enable ssh
           sudo systemctl restart ssh
 
       - name: Install Tailscale
@@ -56,18 +38,13 @@ jobs:
       - name: Keep alive
         run: sleep 20000
 
-      - name: Dispatch A
+      - name: Restart A
         if: always()
         run: |
-          cycles=${{ github.event.inputs.cycles }}
+          cycles=${{ inputs.cycles }}
           next=$((cycles-1))
-          if [ "$next" -gt 0 ]; then
-            curl -X POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/${{ github.repository }}/actions/workflows/ssh-runner-a.yml/dispatches \
-              -d "{\"ref\":\"main\",\"inputs\":{
-                     \"ts_authkey\":\"${TAILSCALE_AUTHKEY}\",
-                     \"username\":\"${USERNAME}\",
-                     \"password\":\"${PASSWORD}\",
-                     \"cycles\":\"$next\"}}"
+          curl -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/ssh-runner-a.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"cycles\":\"$next\"}}"
