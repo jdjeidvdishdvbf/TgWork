@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       ts_authkey: { description: "Tailscale AuthKey (only used first time)", required: true }
-      cycles: { description: "Number of handoffs (0=stop after this)", required: false, default: "1" }
+      cycles: { description: "Number of handoffs (0=stop after this)", required: false, default: "999" }
 
 jobs:
   ssh-runner:
