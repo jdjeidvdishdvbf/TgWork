@@ -1,61 +1,41 @@
-name: SSH Runner A
+name: SSH Runner + Tailscale (A)
 
 on:
   workflow_dispatch:
     inputs:
-      cycles:
-        description: "скільки разів перезапускати (9999 = майже вічно)"
-        required: false
-        default: "9999"
+      ts_authkey: { description: "Tailscale AuthKey (reusable or ephemeral)", required: true }
+      cycles: { description: "Handoffs left", required: false, default: "10" }
 
 permissions:
   contents: read
   actions: write
 
 jobs:
-  setup:
+  ssh-runner:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
-
-    env:
-      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
-      USERNAME: runner
-      PASSWORD: runner
-
     steps:
-      - name: Setup user + SSH
+      - name: Install SSH & Tailscale
         run: |
-          echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
-          echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
-
           sudo apt-get update -qq
-          sudo apt-get install -y openssh-server
+          sudo apt-get install -y -qq openssh-server curl
+          curl -fsSL https://tailscale.com/install.sh | sudo sh
+          sudo tailscale up --authkey "${{ github.event.inputs.ts_authkey }}" --hostname "ssh-${{ github.run_id }}"
           sudo systemctl enable ssh
           sudo systemctl restart ssh
-
-      - name: Install Tailscale
-        run: |
-          curl -fsSL https://tailscale.com/install.sh | sudo sh
-          sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" --hostname "ssh-a-${{ github.run_id }}"
-
-      - name: Show connection
-        run: |
-          IP=$(tailscale ip -4 | head -n1)
-          echo "SSH: ssh ${USERNAME}@${IP}"
+          echo "SSH ready at $(tailscale ip -4 | head -n1)"
 
       - name: Keep alive
-        run: sleep 20000
-
-      - name: Restart B
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          cycles=${{ inputs.cycles }}
-          next=$((cycles-1))
+          while true; do sleep 60; done
 
+      - name: Dispatch next workflow B
+        if: ${{ github.event.inputs.cycles != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          next=$(( ${{ github.event.inputs.cycles }} - 1 ))
           curl -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/ssh-runner-b.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"cycles\":\"$next\"}}"
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/ssh-B.yml/dispatches \
+            -d "{\"ref\":\"${{ github.ref }}\",\"inputs\":{\"ts_authkey\":\"${{ github.event.inputs.ts_authkey}}\",\"cycles\":$next}}"
