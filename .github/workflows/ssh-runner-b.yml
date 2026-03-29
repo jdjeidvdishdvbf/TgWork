@@ -38,7 +38,7 @@ jobs:
           sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" --hostname "ssh-b-${{ github.run_id }}"
 
       - name: Run Telegram Bot
-        run: python3 .github/tg_ping_b.py &
+        run: python3 .github/tg_ping_a.py &
 
       - name: Keep alive
         run: sleep 20000
